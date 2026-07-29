@@ -45,6 +45,8 @@ class Gitcord(commands.Bot):
         self.config = config
         self.db = Database(config.db_path)
         self.github = GitHubClient(config.github_token)
+        # on_ready 는 재접속 때마다 불리므로 정리는 한 번만 한다.
+        self._cleaned_guild_commands = False
 
     # ── 수명주기 ────────────────────────────────────────────
 
@@ -59,7 +61,8 @@ class Gitcord(commands.Bot):
             guild = discord.Object(id=self.config.guild_id)
             self.tree.copy_global_to(guild=guild)
             synced = await self.tree.sync(guild=guild)
-            log.info("커맨드 %d개를 테스트 서버(%s)에 동기화했습니다",
+            log.info("커맨드 %d개를 테스트 서버(%s)에만 동기화했습니다 — "
+                     "다른 서버에서는 커맨드가 보이지 않습니다",
                      len(synced), self.config.guild_id)
         else:
             synced = await self.tree.sync()
@@ -81,6 +84,40 @@ class Gitcord(commands.Bot):
 
     async def on_ready(self) -> None:
         log.info("로그인: %s (서버 %d개)", self.user, len(self.guilds))
+
+        if not self.config.guild_id and not self._cleaned_guild_commands:
+            self._cleaned_guild_commands = True
+            await self._clear_stale_guild_commands()
+
+    async def _clear_stale_guild_commands(self) -> None:
+        """전역 등록으로 전환했을 때 남아있는 서버 전용 커맨드를 지운다.
+
+        개발 중 GUILD_ID 로 동기화하면 그 서버에 커맨드 사본이 생긴다. 나중에
+        GUILD_ID 를 비워 전역 등록으로 바꿔도 사본은 그대로 남아서, 해당 서버에서는
+        같은 커맨드가 두 개씩 보인다. 봇이 들어가 있는 서버를 훑어 정리한다.
+
+        setup_hook 이 아니라 on_ready 에서 하는 이유는 그 시점에야 길드 목록이
+        채워지기 때문이다. 남은 커맨드가 있는 서버만 동기화해서 불필요한 API
+        호출을 피한다.
+        """
+        for guild in self.guilds:
+            try:
+                stale = await self.tree.fetch_commands(guild=guild)
+            except discord.HTTPException:
+                continue
+            if not stale:
+                continue
+            try:
+                self.tree.clear_commands(guild=guild)
+                await self.tree.sync(guild=guild)
+            except discord.HTTPException as exc:
+                log.warning("%s 서버의 중복 커맨드 정리 실패: %s", guild.name, exc)
+            else:
+                log.info(
+                    "%s 서버에 남아있던 서버 전용 커맨드 %d개를 정리했습니다 "
+                    "(이제 전역 커맨드만 보입니다)",
+                    guild.name, len(stale),
+                )
 
     # ── 알림 전송 ───────────────────────────────────────────
 
