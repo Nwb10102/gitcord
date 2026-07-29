@@ -272,6 +272,19 @@ class Database:
             (",".join(categories), guild_id, repo),
         )
 
+    async def set_categories_by_id(self, watch_id: int, categories: Sequence[str]) -> int:
+        """구독 한 건만 바꾼다.
+
+        같은 저장소를 여러 채널에 서로 다른 설정으로 구독할 수 있으므로,
+        UI 에서는 저장소 이름이 아니라 구독 id 로 지목해야 한다.
+        """
+        return await self.execute(
+            "UPDATE watch SET events = ? WHERE id = ?", (",".join(categories), watch_id)
+        )
+
+    async def remove_watch_by_id(self, watch_id: int) -> int:
+        return await self.execute("DELETE FROM watch WHERE id = ?", (watch_id,))
+
     async def list_watches(self, guild_id: int) -> list[Watch]:
         rows = await self.fetchall(
             "SELECT * FROM watch WHERE guild_id = ? ORDER BY repo, channel_id",

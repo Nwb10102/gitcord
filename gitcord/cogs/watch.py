@@ -13,6 +13,7 @@ from discord.ext import commands
 from .. import categories as cat
 from ..bot import Gitcord
 from ..github import normalize_repo
+from ..ui import SettingsView, category_lines
 
 # 알림을 보낼 수 있는 채널 종류
 SendableChannel = discord.TextChannel | discord.Thread | discord.VoiceChannel
@@ -82,20 +83,27 @@ class Watch(commands.Cog):
             categories=selected,
         )
         if not added:
-            await interaction.followup.send(
-                f"`{full_name}` 은(는) 이미 {target.mention} 에서 구독 중입니다. "
-                "알림 종류를 바꾸려면 `/watch events` 를 써주세요.",
-                ephemeral=True,
+            embed = discord.Embed(
+                title="이미 구독 중입니다",
+                description=(
+                    f"`{full_name}` 은(는) {target.mention} 에서 이미 추적하고 있습니다.\n"
+                    "알림 종류를 바꾸려면 `/watch list` 를 여세요."
+                ),
+                color=0xD4A72C,
             )
+            await interaction.followup.send(embed=embed, ephemeral=True)
             return
 
-        await interaction.followup.send(
-            f"**{info.get('full_name') or full_name}** 구독을 시작했습니다.\n"
-            f"채널: {target.mention} · 알림: {cat.label(selected)}\n"
-            f"-# 첫 폴링에서는 과거 이벤트를 보내지 않고 기준점만 잡습니다. "
-            f"다음 활동부터 알림이 갑니다.",
-            ephemeral=True,
+        embed = discord.Embed(
+            title=f"{info.get('full_name') or full_name} 구독 시작",
+            url=info.get("html_url"),
+            description=f"알림 채널 {target.mention}\n\n{category_lines(selected)}",
+            color=0x2EA043,
         )
+        embed.set_footer(
+            text="첫 폴링은 기준점만 잡습니다. 다음 활동부터 알림이 갑니다."
+        )
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
     # ── 해제 ────────────────────────────────────────────────
 
@@ -118,45 +126,34 @@ class Watch(commands.Cog):
             channel_id=channel.id if channel else None,
         )
         if removed == 0:
-            await interaction.response.send_message(
-                f"`{full_name}` 구독을 찾지 못했습니다. `/watch list` 로 확인해주세요.",
-                ephemeral=True,
+            embed = discord.Embed(
+                title="구독을 찾지 못했습니다",
+                description=f"`{full_name}` 은(는) 구독 목록에 없습니다.\n"
+                "`/watch list` 로 현재 구독을 확인해보세요.",
+                color=0xD4A72C,
             )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
         await self.bot.db.prune_cursors()
-        scope = channel.mention if channel else "이 서버"
-        await interaction.response.send_message(
-            f"`{full_name}` 구독 {removed}건을 {scope} 에서 해제했습니다.", ephemeral=True
+        scope = channel.mention if channel else "이 서버 전체"
+        embed = discord.Embed(
+            title="구독 해제",
+            description=f"`{full_name}` 구독 **{removed}건**을 {scope} 에서 해제했습니다.",
+            color=0x6E7781,
         )
-
-    # ── 목록 ────────────────────────────────────────────────
-
-    @group.command(name="list", description="이 서버의 구독 목록을 봅니다.")
-    async def list_(self, interaction: discord.Interaction) -> None:
-        watches = await self.bot.db.list_watches(interaction.guild_id)
-        if not watches:
-            await interaction.response.send_message(
-                "구독 중인 저장소가 없습니다. `/watch add repo:owner/name` 으로 시작하세요.",
-                ephemeral=True,
-            )
-            return
-
-        embed = discord.Embed(title="구독 중인 저장소", color=0x0969DA)
-        for watch in watches[:25]:  # 임베드 필드 상한
-            embed.add_field(
-                name=watch.repo,
-                value=(
-                    f"<#{watch.channel_id}>\n"
-                    f"알림: {cat.label(watch.categories)}\n"
-                    f"AI 요약: {'켜짐' if watch.ai_summary else '꺼짐'}"
-                ),
-                inline=False,
-            )
-        if len(watches) > 25:
-            embed.set_footer(text=f"…외 {len(watches) - 25}건")
-
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    # ── 목록 · 설정 화면 ────────────────────────────────────
+
+    @group.command(
+        name="list", description="구독 목록을 보고 알림 종류를 켜고 끕니다."
+    )
+    async def list_(self, interaction: discord.Interaction) -> None:
+        view = SettingsView(
+            self.bot, guild_id=interaction.guild_id, author_id=interaction.user.id
+        )
+        await view.send(interaction)
 
     # ── 알림 종류 변경 ──────────────────────────────────────
 
@@ -182,17 +179,22 @@ class Watch(commands.Cog):
             guild_id=interaction.guild_id, repo=full_name, categories=selected
         )
         if updated == 0:
-            await interaction.response.send_message(
-                f"`{full_name}` 구독을 찾지 못했습니다. 먼저 `/watch add` 로 추가해주세요.",
-                ephemeral=True,
+            embed = discord.Embed(
+                title="구독을 찾지 못했습니다",
+                description=f"`{full_name}` 을(를) 먼저 `/watch add` 로 추가해주세요.",
+                color=0xD4A72C,
             )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
-        await interaction.response.send_message(
-            f"`{full_name}` 의 알림을 **{cat.label(selected)}** 로 바꿨습니다. "
-            f"({updated}개 채널)",
-            ephemeral=True,
+        embed = discord.Embed(
+            title=full_name,
+            url=f"https://github.com/{full_name}",
+            description=category_lines(selected),
+            color=0x0969DA if selected else 0x6E7781,
         )
+        embed.set_footer(text=f"채널 {updated}곳에 적용했습니다")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @add.autocomplete("events")
     @events.autocomplete("events")

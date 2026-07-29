@@ -125,6 +125,10 @@ class Gitcord(commands.Bot):
             else:
                 sent += 1
 
+        # 전송 성공을 남기지 않으면 "알림이 안 온다"는 신고가 들어왔을 때 봇이
+        # 안 보낸 건지 디스코드에서 막힌 건지 로그로 가릴 수가 없다.
+        if sent:
+            log.info("%s [%s] → 채널 %d곳 전송", repo, post.category, sent)
         return sent
 
     # ── 에러 처리 ───────────────────────────────────────────

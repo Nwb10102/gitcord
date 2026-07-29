@@ -417,6 +417,66 @@ async def test_db(db: Database) -> None:
     ok("구독 해제 시 커서도 정리된다")
 
 
+# ── 설정 UI ─────────────────────────────────────────────────
+
+
+async def test_ui(db: Database) -> None:
+    print("ui (구독 설정 화면)")
+    from gitcord.categories import CATEGORIES
+    from gitcord.ui import OFF, ON, SettingsView, category_lines
+
+    guild = 4242
+    await db.add_watch(guild_id=guild, channel_id=1, repo="ui/alpha",
+                       categories=("push", "ci"))
+    await db.add_watch(guild_id=guild, channel_id=2, repo="ui/beta", categories=())
+    bot = SimpleNamespace(db=db)
+
+    view = SettingsView(bot, guild_id=guild, author_id=7)
+    await view.load()
+    # 목록 화면에는 저장소 셀렉트만 있다
+    assert [type(c).__name__ for c in view.children] == ["RepoSelect"]
+    assert len(view.embed().fields) == 2
+    ok("목록 화면 — 저장소 셀렉트만 표시")
+
+    view.selected_id = view.watches[0].id
+    view.rebuild()
+    names = [type(c).__name__ for c in view.children]
+    assert names == ["RepoSelect", "CategorySelect", "BackButton",
+                     "_StateButton", "_StateButton", "RemoveButton"], names
+    ok("상세 화면 — 셀렉트 2개 + 버튼 4개")
+
+    catsel = view.children[1]
+    assert {o.value for o in catsel.options if o.default} == {"push", "ci"}
+    # 전부 해제할 수 있어야 "구독은 두고 알림만 끄기"가 가능하다
+    assert catsel.min_values == 0 and catsel.max_values == len(CATEGORIES)
+    ok("체크박스 초기값이 현재 설정과 일치 · 전체 해제 허용")
+
+    body = view.embed().description
+    assert body.count(ON) == 2 and body.count(OFF) == len(CATEGORIES) - 2
+    ok("임베드 체크리스트가 켜짐/꺼짐을 정확히 반영")
+
+    view.selected_id = view.watches[1].id
+    view.rebuild()
+    embed = view.embed()
+    assert embed.color.value == 0x6E7781 and "모두 꺼져" in embed.footer.text
+    ok("알림 0건인 구독은 회색 + 안내 문구")
+
+    await db.set_categories_by_id(view.selected_id, ("pr", "issue"))
+    await view.load()
+    assert view.selected.categories == ("pr", "issue")
+    ok("set_categories_by_id — 구독 한 건만 변경")
+
+    for watch in list(view.watches):
+        await db.remove_watch_by_id(watch.id)
+    await view.load()
+    # 옵션이 0개인 셀렉트는 디스코드가 거부하므로 아예 만들지 않아야 한다
+    assert view.children == [] and "없습니다" in view.embed().title
+    ok("구독 0건 — 셀렉트를 만들지 않는다 (빈 옵션 오류 방지)")
+
+    assert category_lines(("push",)).startswith(ON)
+    ok("category_lines 공유 헬퍼")
+
+
 # ── 실행 ────────────────────────────────────────────────────
 
 
@@ -431,6 +491,7 @@ async def main() -> int:
         try:
             await test_watcher(db)
             await test_db(db)
+            await test_ui(db)
         finally:
             await db.close()
 
