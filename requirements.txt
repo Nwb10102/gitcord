@@ -1,0 +1,8 @@
+# discord.py 가 aiohttp 를 함께 가져오므로 HTTP 클라이언트는 따로 필요 없다.
+# Dishost 는 RAM 128MB 이므로 의존성을 늘릴 때마다 유휴 RSS 를 다시 재야 한다.
+discord.py>=2.4,<3
+python-dotenv>=1.0
+
+# 6단계(AI 요약)에서 추가 예정 — 지금 설치하면 메모리만 먹는다.
+# cryptography>=42
+# anthropic>=0.40
