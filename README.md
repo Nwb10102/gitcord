@@ -21,81 +21,6 @@ GitHub 저장소를 추적해 **커밋 · PR · 이슈 · CI 결과**를 디스�
 
 ---
 
-## 준비물
-
-### 1. 디스코드 봇 만들기
-
-1. [Discord Developer Portal](https://discord.com/developers/applications) → **New Application**
-2. **Bot** 탭 → **Reset Token** → 나온 토큰을 복사 (`DISCORD_TOKEN`)
-3. **Installation** 탭 → Scopes 에 `bot` 과 `applications.commands` 체크
-4. Bot Permissions 에 **Send Messages**, **Embed Links** 체크
-5. 생성된 초대 링크로 서버에 추가
-
-특권 인텐트(Message Content, Server Members)는 **필요 없습니다.** 슬래시 커맨드만 씁니다.
-
-### 2. GitHub 토큰 (권장)
-
-없어도 돌아가지만 API 가 **시간당 60회**로 제한되고 비공개 저장소를 추적할 수 없습니다.
-
-[Settings → Developer settings → Personal access tokens](https://github.com/settings/tokens) 에서 발급합니다.
-- 공개 저장소만 추적 → 권한 없는 토큰으로 충분 (시간당 5,000회로 올라감)
-- 비공개 저장소도 추적 → 해당 저장소의 `Contents: Read`
-
----
-
-## 로컬 실행
-
-```bash
-python -m venv .venv
-.venv\Scripts\activate        # macOS/Linux: source .venv/bin/activate
-pip install -r requirements.txt
-
-copy .env.example .env        # macOS/Linux: cp .env.example .env
-# .env 를 열어 DISCORD_TOKEN 과 GITHUB_TOKEN 을 채웁니다
-
-python main.py
-```
-
-개발 중에는 `.env` 의 `GUILD_ID` 에 테스트 서버 ID 를 넣으세요. 슬래시 커맨드가
-그 서버에 **즉시** 등록됩니다. 비워두면 전역 등록이라 디스코드 반영까지 최대 1시간
-걸립니다.
-
-테스트:
-
-```bash
-python tests/test_core.py
-```
-
----
-
-## Dishost 배포
-
-1. 새 봇 생성 → **Python** 선택
-2. **Git 주소**에 이 저장소를 넣고 `AUTO_UPDATE` 켜기
-   → 이후 배포는 GitHub 에 푸시하고 재시작만 하면 됩니다
-3. **간편 설정 → 환경변수**에 `DISCORD_TOKEN`, `GITHUB_TOKEN` 등록
-   - `.env` 는 `.gitignore` 로 막혀 있어 저장소에 없습니다. 패널이 "`.env` 파일을
-     불러오는데 실패했습니다"라고 해도 **정상**입니다 — 토큰이 공개 저장소에
-     올라가지 않도록 일부러 그렇게 해뒀습니다.
-   - `GUILD_ID` 는 넣지 마세요. 넣으면 그 서버에서만 커맨드가 보입니다.
-4. 시작 파일은 손대지 않아도 됩니다
-
-시작 파일에 대해: Dishost 의 기본값이 `app.py` 라서 저장소에 같은 이름의 얇은
-진입점을 두고 `main.py` 를 부르게 해놨습니다. 패널 설정을 `main.py` 로 바꿔도
-동일하게 동작합니다.
-
-### 128MB 메모리 안에서 돌리기
-
-Dishost 무료 플랜은 RAM 128MB 입니다. 이 봇은 그 상한을 전제로 만들어졌습니다.
-
-- 멤버 · 메시지 캐시를 모두 끄고 최소 인텐트(`guilds`)만 씁니다
-- `aiosqlite` 없이 stdlib `sqlite3` 만 씁니다
-- 한 사이클에 저장소당 최대 15건까지만 전송합니다
-
-의존성을 추가할 때는 **패널의 메모리 사용량을 반드시 다시 확인하세요.**
-
----
-
 ## 명령어
 
 | 명령 | 권한 | 설명 |
@@ -140,8 +65,6 @@ Dishost 무료 플랜은 RAM 128MB 입니다. 이 봇은 그 상한을 전제로
 - GitHub Actions 는 활동 이벤트에 포함되지 않아, `ci` 를 구독한 저장소만 따로 조회합니다
 - 커서는 저장소 단위입니다. 서버 3개가 같은 저장소를 구독해도 GitHub 호출은 1회입니다
 
-`POLL_INTERVAL_SECONDS` 로 주기를 바꿀 수 있습니다(최소 30초, 기본 90초).
-
 ### 구독 직후 동작
 
 첫 폴링에서는 **아무것도 보내지 않고 기준점만 잡습니다.** 안 그러면 구독하자마자
@@ -160,19 +83,6 @@ Dishost 무료 플랜은 RAM 128MB 입니다. 이 봇은 그 상한을 전제로
 - GitHub 이 비공개 저장소에 대해 접근 권한이 없을 때도 404 를 돌려주기 때문에,
   404 가 나도 구독을 자동으로 지우지 않고 1시간 뒤 재시도합니다. `/watch list` 와
   로그를 확인하세요.
-
----
-
-## 환경변수
-
-| 이름 | 필수 | 기본 | 설명 |
-|---|:---:|---|---|
-| `DISCORD_TOKEN` | ✅ | | 봇 토큰 |
-| `GITHUB_TOKEN` | | | 없으면 시간당 60회 제한 · 비공개 저장소 불가 |
-| `GUILD_ID` | | | 개발용 테스트 서버 ID (커맨드 즉시 등록) |
-| `POLL_INTERVAL_SECONDS` | | `90` | 폴링 주기(초), 최소 30 |
-| `DATA_DIR` | | `data` | SQLite 파일 위치 |
-| `GITCORD_SECRET_KEY` | | | AI 요약용 (아직 미사용) |
 
 ---
 
@@ -209,6 +119,8 @@ GitHub 저장소 이벤트 API 에는 문서만 보고는 알기 어려운 함�
   `closed`+`merged:true` 가 아니라 action 자체가 `merged` 로 옵니다.
 - aiohttp 응답 헤더를 `dict()` 로 바꾸면 대소문자 무시 조회가 깨집니다. GitHub 은
   `ETag` 를 대문자로 보내므로 그대로 두면 조건부 요청이 통째로 무력화됩니다.
+
+---
 
 ## 진행 상황
 
