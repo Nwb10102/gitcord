@@ -71,9 +71,18 @@ python tests/test_core.py
 ## Dishost 배포
 
 1. 새 봇 생성 → **Python** 선택
-2. 파일 업로드 (`.venv`, `data/`, `.env` 는 제외 — `.gitignore` 참고)
-3. **환경변수** 탭에 `DISCORD_TOKEN`, `GITHUB_TOKEN` 등록 (`.env` 파일 대신 써도 됩니다)
-4. 실행 파일: `main.py`
+2. **Git 주소**에 이 저장소를 넣고 `AUTO_UPDATE` 켜기
+   → 이후 배포는 GitHub 에 푸시하고 재시작만 하면 됩니다
+3. **간편 설정 → 환경변수**에 `DISCORD_TOKEN`, `GITHUB_TOKEN` 등록
+   - `.env` 는 `.gitignore` 로 막혀 있어 저장소에 없습니다. 패널이 "`.env` 파일을
+     불러오는데 실패했습니다"라고 해도 **정상**입니다 — 토큰이 공개 저장소에
+     올라가지 않도록 일부러 그렇게 해뒀습니다.
+   - `GUILD_ID` 는 넣지 마세요. 넣으면 그 서버에서만 커맨드가 보입니다.
+4. 시작 파일은 손대지 않아도 됩니다
+
+시작 파일에 대해: Dishost 의 기본값이 `app.py` 라서 저장소에 같은 이름의 얇은
+진입점을 두고 `main.py` 를 부르게 해놨습니다. 패널 설정을 `main.py` 로 바꿔도
+동일하게 동작합니다.
 
 ### 128MB 메모리 안에서 돌리기
 
