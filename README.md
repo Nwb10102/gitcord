@@ -1,5 +1,7 @@
 # Gitcord
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 GitHub 저장소를 추적해 **커밋 · PR · 이슈 · CI 결과**를 디스코드 채널로 보내는 봇입니다.
 저장소마다 받을 알림 종류를 따로 고를 수 있습니다.
 
@@ -7,7 +9,7 @@ GitHub 저장소를 추적해 **커밋 · PR · 이슈 · CI 결과**를 디스�
 /watch add repo:owner/name
 ```
 
-<sub>Python 3.11+ · discord.py 2.x · 외부 서비스 의존 없음(GitHub API 만 사용)</sub>
+<sub>Python 3.11+ · discord.py 2.x · 외부 서비스 의존 없음(GitHub API 만 사용) · MIT License</sub>
 
 ## 특징
 
@@ -136,6 +138,4 @@ GitHub 저장소 이벤트 API 에는 문서만 보고는 알기 어려운 함�
 
 ## 라이선스
 
-아직 정하지 않았습니다. 라이선스 파일이 없으면 기본적으로 **모든 권리가 저작자에게
-유보**되며, 다른 사람이 법적으로 사용·수정·재배포할 수 없습니다. 공개해서 쓰이길
-원한다면 `LICENSE` 파일을 추가하세요 (MIT 가 무난합니다).
+이 프로젝트는 [MIT License](LICENSE)를 따르는 오픈소스 소프트웨어입니다. 자유롭게 사용, 수정, 배포하실 수 있습니다.
