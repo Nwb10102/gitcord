@@ -13,7 +13,7 @@ from discord.ext import commands
 from .. import categories as cat
 from ..bot import Gitcord
 from ..github import normalize_repo
-from ..ui import SettingsView, category_lines
+from ..ui import RemoveView, SettingsView, category_lines
 
 # 알림을 보낼 수 있는 채널 종류
 SendableChannel = discord.TextChannel | discord.Thread | discord.VoiceChannel
@@ -107,18 +107,29 @@ class Watch(commands.Cog):
 
     # ── 해제 ────────────────────────────────────────────────
 
-    @group.command(name="remove", description="저장소 구독을 해제합니다.")
+    @group.command(
+        name="remove", description="구독 목록에서 골라 해제합니다."
+    )
     @app_commands.describe(
-        repo="owner/name 또는 저장소 URL",
+        repo="생략하면 목록에서 고를 수 있습니다",
         channel="이 채널의 구독만 해제 (생략하면 서버 전체)",
     )
     @app_commands.checks.has_permissions(manage_guild=True)
     async def remove(
         self,
         interaction: discord.Interaction,
-        repo: str,
+        repo: str | None = None,
         channel: SendableChannel | None = None,
     ) -> None:
+        # repo 를 안 주면 목록에서 고르는 화면을 연다. 이름을 정확히 기억하지
+        # 못해도 해제할 수 있고, 여러 건을 한 번에 지울 수 있다.
+        if repo is None:
+            view = RemoveView(
+                self.bot, guild_id=interaction.guild_id, author_id=interaction.user.id
+            )
+            await view.send(interaction)
+            return
+
         full_name = normalize_repo(repo)
         removed = await self.bot.db.remove_watch(
             guild_id=interaction.guild_id,

@@ -33,6 +33,58 @@ def category_lines(categories: tuple[str, ...] | list[str]) -> str:
     )
 
 
+class GuildView(discord.ui.View):
+    """길드 안에서 도는 메뉴의 공통 부분.
+
+    - 메뉴를 연 사람만 조작할 수 있다 (다른 사람이 남의 메뉴를 건드리지 못하게).
+    - 설정을 바꾸는 조작에는 서버 관리 권한을 따로 확인한다.
+    - 만료되면 컴포넌트를 비활성화한다. 안 그러면 시간 지난 메뉴를 눌렀을 때
+      "응답 없음"으로 보인다.
+    """
+
+    def __init__(self, bot, *, guild_id: int, author_id: int) -> None:
+        super().__init__(timeout=180)
+        self.bot = bot
+        self.guild_id = guild_id
+        self.author_id = author_id
+        self._interaction: discord.Interaction | None = None
+
+    def channel_label(self, channel_id: int) -> str:
+        """셀렉트 옵션의 description 에는 멘션이 렌더링되지 않아 이름을 직접 찾는다."""
+        channel = self.bot.get_channel(channel_id)
+        return f"#{channel.name}" if channel is not None else f"채널 {channel_id}"
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message(
+                "이 메뉴는 명령을 실행한 사람만 쓸 수 있습니다. 직접 실행해주세요.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    async def ensure_can_edit(self, interaction: discord.Interaction) -> bool:
+        permissions = getattr(interaction.user, "guild_permissions", None)
+        if permissions is None or not permissions.manage_guild:
+            await interaction.response.send_message(
+                "설정을 바꾸려면 **서버 관리** 권한이 필요합니다.", ephemeral=True
+            )
+            return False
+        return True
+
+    async def on_timeout(self) -> None:
+        for item in self.children:
+            item.disabled = True
+        if self._interaction is None:
+            return
+        try:
+            await self._interaction.edit_original_response(
+                content="-# 메뉴가 만료됐습니다. 명령을 다시 실행해주세요.", view=self
+            )
+        except discord.HTTPException:
+            pass
+
+
 class RepoSelect(discord.ui.Select["SettingsView"]):
     def __init__(self, watches: list[Watch], selected_id: int | None) -> None:
         options = [
@@ -152,17 +204,13 @@ class BackButton(discord.ui.Button["SettingsView"]):
         await view.rerender(interaction)
 
 
-class SettingsView(discord.ui.View):
+class SettingsView(GuildView):
     def __init__(self, bot, *, guild_id: int, author_id: int) -> None:
-        super().__init__(timeout=180)
-        self.bot = bot
-        self.guild_id = guild_id
-        self.author_id = author_id
+        super().__init__(bot, guild_id=guild_id, author_id=author_id)
         self.watches: list[Watch] = []
         self.selected_id: int | None = None
         self.confirm_remove = False
         self.notice: str | None = None
-        self._interaction: discord.Interaction | None = None
 
     # ── 상태 ────────────────────────────────────────────────
 
@@ -259,29 +307,8 @@ class SettingsView(discord.ui.View):
             embed=self.embed(), view=self, ephemeral=True
         )
 
-    # ── 권한 · 수명 ─────────────────────────────────────────
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.author_id:
-            await interaction.response.send_message(
-                "이 메뉴는 명령을 실행한 사람만 쓸 수 있습니다. "
-                "`/watch list` 로 직접 열어주세요.",
-                ephemeral=True,
-            )
-            return False
-        return True
-
     async def ensure_can_edit(self, interaction: discord.Interaction) -> bool:
-        """설정을 바꾸는 조작에는 서버 관리 권한이 필요하다.
-
-        목록을 보는 것 자체는 누구나 할 수 있으므로 조회와 수정을 나눠서 막는다.
-        """
-        permissions = getattr(interaction.user, "guild_permissions", None)
-        if permissions is None or not permissions.manage_guild:
-            await interaction.response.send_message(
-                "설정을 바꾸려면 **서버 관리** 권한이 필요합니다. 목록 조회는 가능합니다.",
-                ephemeral=True,
-            )
+        if not await super().ensure_can_edit(interaction):
             return False
         if self.selected_id is None:
             await interaction.response.send_message(
@@ -290,16 +317,133 @@ class SettingsView(discord.ui.View):
             return False
         return True
 
-    async def on_timeout(self) -> None:
-        # 시간이 지난 메뉴를 눌렀을 때 "응답 없음"으로 보이지 않게 비활성화한다.
-        for item in self.children:
-            item.disabled = True
-        if self._interaction is None:
-            return
-        try:
-            await self._interaction.edit_original_response(
-                content="-# 메뉴가 만료됐습니다. `/watch list` 로 다시 열어주세요.",
-                view=self,
+
+# ── 구독 해제 화면 ──────────────────────────────────────────
+
+
+class RemoveSelect(discord.ui.Select["RemoveView"]):
+    def __init__(self, view: RemoveView) -> None:
+        options = [
+            discord.SelectOption(
+                label=watch.repo[:100],
+                value=str(watch.id),
+                description=(
+                    f"{view.channel_label(watch.channel_id)} · "
+                    f"{'알림 꺼짐' if not watch.categories else f'알림 {len(watch.categories)}종'}"
+                )[:100],
+                default=watch.id in view.chosen,
             )
-        except discord.HTTPException:
-            pass
+            for watch in view.watches[:MAX_OPTIONS]
+        ]
+        super().__init__(
+            placeholder="해제할 저장소를 고르세요 (여러 개 선택 가능)",
+            min_values=0,
+            max_values=len(options),
+            options=options,
+            row=0,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view = self.view
+        assert view is not None
+        view.chosen = {int(v) for v in self.values}
+        await view.rerender(interaction)
+
+
+class ConfirmRemoveButton(discord.ui.Button["RemoveView"]):
+    """선택한 항목을 실제로 지운다.
+
+    셀렉트에서 고르는 것만으로 바로 지우지 않는 이유는, 구독을 지우면 폴링 커서도
+    함께 사라져서 다시 추가할 때 기준점을 새로 잡느라 그사이 활동을 놓치기 때문이다.
+    되돌리기가 완전히 공짜는 아니라서 버튼 한 번을 확인 절차로 뒀다.
+    """
+
+    def __init__(self, count: int) -> None:
+        super().__init__(
+            label=f"선택한 {count}건 해제" if count else "해제할 저장소를 먼저 고르세요",
+            emoji="🗑️" if count else None,
+            style=discord.ButtonStyle.danger if count else discord.ButtonStyle.secondary,
+            disabled=count == 0,
+            row=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view = self.view
+        assert view is not None
+        if not await view.ensure_can_edit(interaction):
+            return
+
+        removed = [w for w in view.watches if w.id in view.chosen]
+        for watch in removed:
+            await view.bot.db.remove_watch_by_id(watch.id)
+        await view.bot.db.prune_cursors()
+        view.chosen.clear()
+        await view.rerender(interaction, removed=removed)
+
+
+class RemoveView(GuildView):
+    def __init__(self, bot, *, guild_id: int, author_id: int) -> None:
+        super().__init__(bot, guild_id=guild_id, author_id=author_id)
+        self.watches: list[Watch] = []
+        self.chosen: set[int] = set()
+        self.removed: list[Watch] = []
+
+    async def load(self) -> None:
+        self.watches = await self.bot.db.list_watches(self.guild_id)
+        # 이미 사라진 구독이 선택 상태로 남지 않게 정리한다.
+        self.chosen &= {w.id for w in self.watches}
+        self.clear_items()
+        if self.watches:
+            self.add_item(RemoveSelect(self))
+            self.add_item(ConfirmRemoveButton(len(self.chosen)))
+
+    def embed(self) -> discord.Embed:
+        if not self.watches:
+            title = "구독이 모두 해제됐습니다" if self.removed else "구독 중인 저장소가 없습니다"
+            embed = discord.Embed(
+                title=title,
+                description="`/watch add repo:owner/name` 으로 다시 추가할 수 있습니다.",
+                color=0x6E7781,
+            )
+        else:
+            embed = discord.Embed(
+                title="구독 해제",
+                description="해제할 저장소를 고른 뒤 아래 버튼을 누르세요.",
+                color=0xCF222E if self.chosen else 0x0969DA,
+            )
+            for watch in self.watches[:MAX_OPTIONS]:
+                mark = "🗑️ " if watch.id in self.chosen else ""
+                state = "알림 꺼짐" if not watch.categories else " · ".join(
+                    CATEGORIES[c] for c in watch.categories
+                )
+                embed.add_field(
+                    name=f"{mark}{watch.repo}",
+                    value=f"<#{watch.channel_id}>\n{state}",
+                    inline=False,
+                )
+            if len(self.watches) > MAX_OPTIONS:
+                embed.set_footer(
+                    text=f"구독 {len(self.watches)}건 중 {MAX_OPTIONS}건만 표시됩니다"
+                )
+
+        if self.removed:
+            embed.add_field(
+                name=f"방금 해제함 ({len(self.removed)}건)",
+                value="\n".join(f"`{w.repo}` — <#{w.channel_id}>" for w in self.removed),
+                inline=False,
+            )
+        return embed
+
+    async def rerender(
+        self, interaction: discord.Interaction, *, removed: list[Watch] | None = None
+    ) -> None:
+        self.removed = removed or []
+        await self.load()
+        await interaction.response.edit_message(embed=self.embed(), view=self)
+
+    async def send(self, interaction: discord.Interaction) -> None:
+        self._interaction = interaction
+        await self.load()
+        await interaction.response.send_message(
+            embed=self.embed(), view=self, ephemeral=True
+        )

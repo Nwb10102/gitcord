@@ -477,6 +477,58 @@ async def test_ui(db: Database) -> None:
     ok("category_lines 공유 헬퍼")
 
 
+async def test_remove_ui(db: Database) -> None:
+    print("ui (구독 해제 화면)")
+    from gitcord.ui import RemoveView
+
+    guild = 5151
+    ids = []
+    for n, repo in enumerate(("rm/alpha", "rm/beta", "rm/gamma")):
+        await db.add_watch(guild_id=guild, channel_id=n + 1, repo=repo,
+                           categories=("push",))
+    ids = [w.id for w in await db.list_watches(guild)]
+
+    # get_channel 이 None 을 돌려줘도(캐시에 없는 채널) 죽지 않아야 한다
+    bot = SimpleNamespace(db=db, get_channel=lambda cid: None)
+    view = RemoveView(bot, guild_id=guild, author_id=7)
+    await view.load()
+    assert [type(c).__name__ for c in view.children] == ["RemoveSelect", "ConfirmRemoveButton"]
+    ok("셀렉트 + 확인 버튼")
+
+    # 아무것도 안 고른 상태에서는 버튼이 잠겨 있어야 한다
+    button = view.children[1]
+    assert button.disabled and "먼저 고르세요" in button.label
+    ok("선택 전에는 해제 버튼이 잠김")
+
+    view.chosen = {ids[0], ids[2]}
+    await view.load()
+    button = view.children[1]
+    assert not button.disabled and "2건" in button.label
+    assert view.embed().description is not None
+    ok("2건 선택 — 버튼에 개수 표시")
+
+    for wid in list(view.chosen):
+        await db.remove_watch_by_id(wid)
+    view.removed = [w for w in view.watches if w.id in view.chosen]
+    view.chosen.clear()
+    await view.load()
+    assert len(view.watches) == 1 and view.watches[0].repo == "rm/beta"
+    assert "방금 해제함 (2건)" in [f.name for f in view.embed().fields]
+    ok("선택한 2건만 해제되고 나머지는 남는다")
+
+    # 이미 사라진 구독이 선택 상태로 남지 않아야 한다
+    view.chosen = {99999}
+    await view.load()
+    assert view.chosen == set()
+    ok("존재하지 않는 선택은 자동 정리")
+
+    await db.remove_watch_by_id(view.watches[0].id)
+    view.removed = []
+    await view.load()
+    assert view.children == [] and "없습니다" in view.embed().title
+    ok("구독 0건 — 셀렉트 미생성")
+
+
 # ── 실행 ────────────────────────────────────────────────────
 
 
@@ -492,6 +544,7 @@ async def main() -> int:
             await test_watcher(db)
             await test_db(db)
             await test_ui(db)
+            await test_remove_ui(db)
         finally:
             await db.close()
 
